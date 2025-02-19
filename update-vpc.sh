@@ -13,6 +13,18 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
     echo "Region: $region"
 
     VPC_ID=$(aws ec2 describe-vpcs --region $region --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" --query "Vpcs[*].VpcId" --output text)
+
+    # aws ec2 describe-vpcs --region $region --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" --query "Vpcs[*].CidrBlockAssociationSet[*].CidrBlock"
+
+# [
+#     [
+#         "10.0.0.0/16",
+#         "10.10.0.0/23"
+#     ]
+# ]
+
+# aws ec2 disassociate-vpc-cidr-block --region $REGION --vpc-id $VPC_ID --cidr-block
+
     
     aws ec2 associate-vpc-cidr-block --region $region --vpc-id $VPC_ID --cidr-block $cidr
 
@@ -32,9 +44,11 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
     # Create private subnet
     PRIVATE_SUBNET_NEW=$(aws ec2 create-subnet --region $region --vpc-id $VPC_ID --cidr-block $private_subnet --availability-zone $(aws ec2 describe-availability-zones --region $region --query 'AvailabilityZones[0].ZoneName' --output text) --query 'Subnet.SubnetId' --output text)
     # Tag the private subnet
-    aws ec2 create-tags --region $region --resources $PRIVATE_SUBNET_NEW --tags Key=Name,Value="dig-security-privateus1" Key=dig-security,Value=true
+    aws ec2 create-tags --region $region --resources $PRIVATE_SUBNET_NEW --tags Key=Name,Value="dig-security-privateuse1" Key=dig-security,Value=true
     # Associate the private subnet with the private route table
     aws ec2 associate-route-table --region $region --route-table-id $PRIVATE_ROUTE_TABLE --subnet-id $PRIVATE_SUBNET_NEW
+
+    #aws ec2 delete-subnet --region $region --subnet-id $SUBNET_ID
 
 done
 
