@@ -30,10 +30,10 @@ cleanup_vpc_resources() {
     local region=$1
     echo "Cleaning up existing resources in region: $region"
 
-    # Find VPCs with matching tag
+    # Find VPCs with matching tag - force array output with [*]
     VPC_IDS=$(aws ec2 describe-vpcs --region $region \
         --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" \
-        --query 'Vpcs[*].VpcId' --output text)
+        --query 'Vpcs[*].VpcId[]' --output text)
 
     if [ -z "$VPC_IDS" ] || [ "$VPC_IDS" == "None" ]; then
         echo "No existing VPC found with tag $TARGET_TAG_KEY=$TARGET_TAG_VALUE in region $region"
@@ -47,7 +47,7 @@ cleanup_vpc_resources() {
         # Delete NAT Gateways
         NAT_GATEWAYS=$(aws ec2 describe-nat-gateways --region $region \
             --filter "Name=vpc-id,Values=$VPC_ID" \
-            --query 'NatGateways[*].NatGatewayId' --output text)
+            --query 'NatGateways[*].NatGatewayId[]' --output text)
         
         for NAT_GW in $NAT_GATEWAYS; do
             echo "Deleting NAT Gateway: $NAT_GW"
