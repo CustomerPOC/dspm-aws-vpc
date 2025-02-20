@@ -61,16 +61,16 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         echo "Error: Original private subnet not found in region $region"
     fi
 
-    # Get route tables and verify they exist
-    PUBLIC_ROUTE_TABLE=$(aws ec2 describe-route-tables --region $region --filters "Name=association.subnet-id,Values=$PUBLIC_SUBNET_ORIGINAL" --query "RouteTables[*].RouteTableId" --output text)
+    # Get route tables directly by tag name
+    PUBLIC_ROUTE_TABLE=$(aws ec2 describe-route-tables --region $region --filters "Name=tag:Name,Values=dig-security-publicuse1" --query "RouteTables[*].RouteTableId" --output text)
     if [ -z "$PUBLIC_ROUTE_TABLE" ]; then
-        echo "Error: Public route table not found for subnet $PUBLIC_SUBNET_ORIGINAL"
+        echo "Error: Public route table not found with name dig-security-publicuse1"
         continue
     fi
 
-    PRIVATE_ROUTE_TABLE=$(aws ec2 describe-route-tables --region $region --filters "Name=association.subnet-id,Values=$PRIVATE_SUBNET_ORIGINAL" --query "RouteTables[*].RouteTableId" --output text)
+    PRIVATE_ROUTE_TABLE=$(aws ec2 describe-route-tables --region $region --filters "Name=tag:Name,Values=dig-security-privateuse1" --query "RouteTables[*].RouteTableId" --output text)
     if [ -z "$PRIVATE_ROUTE_TABLE" ]; then
-        echo "Error: Private route table not found for subnet $PRIVATE_SUBNET_ORIGINAL"
+        echo "Error: Private route table not found with name dig-security-privateuse1"
         continue
     fi
 
@@ -99,7 +99,28 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
     echo "Associating private subnet with route table"
     aws ec2 associate-route-table --region $region --route-table-id $PRIVATE_ROUTE_TABLE --subnet-id $PRIVATE_SUBNET_NEW
 
-    # Delete old subnets
+    # Handle NAT Gateway and ENIs before deleting public subnet
+    echo "Finding and deleting NAT Gateway in original public subnet"
+    NAT_GW_ID=$(aws ec2 describe-nat-gateways --region $region --filter "Name=subnet-id,Values=$PUBLIC_SUBNET_ORIGINAL" --query 'NatGateways[0].NatGatewayId' --output text)
+    if [ ! -z "$NAT_GW_ID" ] && [ "$NAT_GW_ID" != "None" ]; then
+        echo "Deleting NAT Gateway: $NAT_GW_ID"
+        aws ec2 delete-nat-gateway --region $region --nat-gateway-id $NAT_GW_ID
+        
+        # Wait for NAT Gateway to be deleted
+        echo "Waiting for NAT Gateway to be deleted..."
+        aws ec2 wait nat-gateway-deleted --region $region --nat-gateway-id $NAT_GW_ID
+    fi
+
+    # Create new NAT Gateway in new public subnet
+    echo "Creating new NAT Gateway"
+    EIP_ALLOC=$(aws ec2 allocate-address --region $region --domain vpc --query 'AllocationId' --output text)
+    NEW_NAT_GW=$(aws ec2 create-nat-gateway --region $region --subnet-id $PUBLIC_SUBNET_NEW --allocation-id $EIP_ALLOC --query 'NatGateway.NatGatewayId' --output text)
+    
+    # Wait for NAT Gateway to be available
+    echo "Waiting for new NAT Gateway to be available..."
+    aws ec2 wait nat-gateway-available --region $region --nat-gateway-id $NEW_NAT_GW
+
+    # Delete old subnets (now safe to delete public subnet)
     echo "Deleting original public subnet"
     aws ec2 delete-subnet --region $region --subnet-id $PUBLIC_SUBNET_ORIGINAL || echo "Warning: Failed to delete original public subnet"
     
