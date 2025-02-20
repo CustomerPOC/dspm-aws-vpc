@@ -30,95 +30,99 @@ cleanup_vpc_resources() {
     local region=$1
     echo "Cleaning up existing resources in region: $region"
 
-    # Find VPCs with matching tag - force array output with [*]
-    VPC_IDS=$(aws ec2 describe-vpcs --region $region \
+    # Find VPCs with matching tag
+    VPC_ID_OUTPUT=$(aws ec2 describe-vpcs --region $region \
         --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" \
-        --query 'Vpcs[*].VpcId[]' --output text)
+        --query 'Vpcs[*].VpcId' --output text)
 
-    if [ -z "$VPC_IDS" ] || [ "$VPC_IDS" == "None" ]; then
+    if [ -z "$VPC_ID_OUTPUT" ] || [ "$VPC_ID_OUTPUT" == "None" ]; then
         echo "No existing VPC found with tag $TARGET_TAG_KEY=$TARGET_TAG_VALUE in region $region"
         return 0
     fi
 
     # Process each VPC
-    for VPC_ID in $VPC_IDS; do
-        echo "Found VPC: $VPC_ID"
+    while read -r VPC_ID; do
+        if [ -n "$VPC_ID" ]; then
+            echo "Found VPC: $VPC_ID"
 
-        # Delete NAT Gateways
-        NAT_GATEWAYS=$(aws ec2 describe-nat-gateways --region $region \
-            --filter "Name=vpc-id,Values=$VPC_ID" \
-            --query 'NatGateways[*].NatGatewayId[]' --output text)
-        
-        for NAT_GW in $NAT_GATEWAYS; do
-            echo "Deleting NAT Gateway: $NAT_GW"
-            aws ec2 delete-nat-gateway --region $region --nat-gateway-id $NAT_GW
-            echo "Waiting for NAT Gateway deletion..."
-            aws ec2 wait nat-gateway-deleted --region $region --nat-gateway-id $NAT_GW
-        done
+            # Delete NAT Gateways
+            NAT_GW_OUTPUT=$(aws ec2 describe-nat-gateways --region $region \
+                --filter "Name=vpc-id,Values=$VPC_ID" \
+                --query 'NatGateways[*].NatGatewayId' --output text)
 
-        # Delete VPC Endpoints
-        VPC_ENDPOINT_OUTPUT=$(aws ec2 describe-vpc-endpoints --region $region \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query 'VpcEndpoints[*].VpcEndpointId' --output text)
+            while read -r NAT_GW; do
+                if [ -n "$NAT_GW" ]; then
+                    echo "Deleting NAT Gateway: $NAT_GW"
+                    aws ec2 delete-nat-gateway --region $region --nat-gateway-id $NAT_GW
+                    echo "Waiting for NAT Gateway deletion..."
+                    aws ec2 wait nat-gateway-deleted --region $region --nat-gateway-id $NAT_GW
+                fi
+            done <<< "$NAT_GW_OUTPUT"
 
-        while read -r ENDPOINT; do
-            if [ -n "$ENDPOINT" ]; then
-                echo "Deleting VPC Endpoint: $ENDPOINT"
-                aws ec2 delete-vpc-endpoints --region $region --vpc-endpoint-ids $ENDPOINT
+            # Delete VPC Endpoints
+            VPC_ENDPOINT_OUTPUT=$(aws ec2 describe-vpc-endpoints --region $region \
+                --filters "Name=vpc-id,Values=$VPC_ID" \
+                --query 'VpcEndpoints[*].VpcEndpointId' --output text)
+
+            while read -r ENDPOINT; do
+                if [ -n "$ENDPOINT" ]; then
+                    echo "Deleting VPC Endpoint: $ENDPOINT"
+                    aws ec2 delete-vpc-endpoints --region $region --vpc-endpoint-ids $ENDPOINT
+                fi
+            done <<< "$VPC_ENDPOINT_OUTPUT"
+
+            # Detach and delete Internet Gateways
+            IGW_ID=$(aws ec2 describe-internet-gateways --region $region \
+                --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+                --query 'InternetGateways[*].InternetGatewayId' --output text)
+            
+            if [ -n "$IGW_ID" ]; then
+                echo "Detaching and deleting Internet Gateway: $IGW_ID"
+                aws ec2 detach-internet-gateway --region $region --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+                aws ec2 delete-internet-gateway --region $region --internet-gateway-id $IGW_ID
             fi
-        done <<< "$VPC_ENDPOINT_OUTPUT"
 
-        # Detach and delete Internet Gateways
-        IGW_ID=$(aws ec2 describe-internet-gateways --region $region \
-            --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
-            --query 'InternetGateways[*].InternetGatewayId' --output text)
-        
-        if [ -n "$IGW_ID" ]; then
-            echo "Detaching and deleting Internet Gateway: $IGW_ID"
-            aws ec2 detach-internet-gateway --region $region --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
-            aws ec2 delete-internet-gateway --region $region --internet-gateway-id $IGW_ID
+            # Delete Subnets
+            SUBNET_OUTPUT=$(aws ec2 describe-subnets --region $region \
+                --filters "Name=vpc-id,Values=$VPC_ID" \
+                --query 'Subnets[*].SubnetId' --output text)
+
+            while read -r SUBNET; do
+                if [ -n "$SUBNET" ]; then
+                    echo "Deleting Subnet: $SUBNET"
+                    aws ec2 delete-subnet --region $region --subnet-id $SUBNET
+                fi
+            done <<< "$SUBNET_OUTPUT"
+
+            # Delete Route Tables (except main)
+            ROUTE_TABLE_OUTPUT=$(aws ec2 describe-route-tables --region $region \
+                --filters "Name=vpc-id,Values=$VPC_ID" \
+                --query 'RouteTables[?Associations[0].Main != `true`].RouteTableId' --output text)
+
+            while read -r RT; do
+                if [ -n "$RT" ]; then
+                    echo "Deleting Route Table: $RT"
+                    aws ec2 delete-route-table --region $region --route-table-id $RT
+                fi
+            done <<< "$ROUTE_TABLE_OUTPUT"
+
+            # Release Elastic IPs
+            EIP_OUTPUT=$(aws ec2 describe-addresses --region $region \
+                --filters "Name=domain,Values=vpc" \
+                --query 'Addresses[?AssociationId==null].AllocationId' --output text)
+
+            while read -r EIP; do
+                if [ -n "$EIP" ]; then
+                    echo "Releasing Elastic IP: $EIP"
+                    aws ec2 release-address --region $region --allocation-id $EIP
+                fi
+            done <<< "$EIP_OUTPUT"
+
+            # Finally, delete the VPC
+            echo "Deleting VPC: $VPC_ID"
+            aws ec2 delete-vpc --region $region --vpc-id $VPC_ID
         fi
-
-        # Delete Subnets
-        SUBNET_OUTPUT=$(aws ec2 describe-subnets --region $region \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query 'Subnets[*].SubnetId' --output text)
-
-        while read -r SUBNET; do
-            if [ -n "$SUBNET" ]; then
-                echo "Deleting Subnet: $SUBNET"
-                aws ec2 delete-subnet --region $region --subnet-id $SUBNET
-            fi
-        done <<< "$SUBNET_OUTPUT"
-
-        # Delete Route Tables (except main)
-        ROUTE_TABLE_OUTPUT=$(aws ec2 describe-route-tables --region $region \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query 'RouteTables[?Associations[0].Main != `true`].RouteTableId' --output text)
-
-        while read -r RT; do
-            if [ -n "$RT" ]; then
-                echo "Deleting Route Table: $RT"
-                aws ec2 delete-route-table --region $region --route-table-id $RT
-            fi
-        done <<< "$ROUTE_TABLE_OUTPUT"
-
-        # Release Elastic IPs
-        EIP_OUTPUT=$(aws ec2 describe-addresses --region $region \
-            --filters "Name=domain,Values=vpc" \
-            --query 'Addresses[?AssociationId==null].AllocationId' --output text)
-
-        while read -r EIP; do
-            if [ -n "$EIP" ]; then
-                echo "Releasing Elastic IP: $EIP"
-                aws ec2 release-address --region $region --allocation-id $EIP
-            fi
-        done <<< "$EIP_OUTPUT"
-
-        # Finally, delete the VPC
-        echo "Deleting VPC: $VPC_ID"
-        aws ec2 delete-vpc --region $region --vpc-id $VPC_ID
-    done
+    done <<< "$VPC_ID_OUTPUT"
 
     echo "Cleanup completed for region $region"
 }
