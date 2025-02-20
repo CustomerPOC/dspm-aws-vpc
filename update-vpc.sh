@@ -60,11 +60,15 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         existing_cidr="${VPC_CIDR_BLOCKS[i]}"
         association_id="${VPC_CIDR_BLOCKS[i+1]}"
         
+        # Clean up any whitespace in the variables
+        existing_cidr=$(echo "$existing_cidr" | tr -d '[:space:]')
+        association_id=$(echo "$association_id" | tr -d '[:space:]')
+        
         echo "Checking CIDR block: $existing_cidr (AssociationId: $association_id)"
         
         if [ "$existing_cidr" = "$cidr" ]; then
             ADD_CIDR="false"
-            echo "CIDR block: $existing_cidr already exists, nothing to add"
+            echo "CIDR block $existing_cidr already exists, skipping addition"
             break
         fi
     done
@@ -167,4 +171,10 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
     done
 
     echo "Successfully processed region $region"
+
+    # At the end of the while read loop, add error checking for empty region
+    if [ -z "$region" ]; then
+        echo "Error: Empty region value encountered"
+        exit 1
+    fi
 done
