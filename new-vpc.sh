@@ -3,6 +3,7 @@
 # Exit on any error
 set -e
 
+DIG_NAME="dig-securityuse1"
 TARGET_TAG_KEY="dig-security"
 TARGET_TAG_VALUE="true"
 CSV_FILE="example.csv"
@@ -25,7 +26,7 @@ if [ ! -f "$CSV_FILE" ]; then
 fi
 
 # Skip the first line (header)
-tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet; do
+tail -n +2 "$CSV_FILE" | grep -v '^[[:space:]]*$' | while read -r region cidr private_subnet public_subnet; do
     echo "Processing Region: $region"
 
     # Verify all required variables are set
@@ -38,7 +39,7 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
     echo "Creating VPC with CIDR $cidr"
     VPC_ID=$(aws ec2 create-vpc --region $region --cidr-block $cidr --query 'Vpc.VpcId' --output text)
     aws ec2 create-tags --region $region --resources $VPC_ID --tags \
-        Key=Name,Value="dig-security" \
+        Key=Name,Value=$DIG_NAME \
         Key=$TARGET_TAG_KEY,Value=$TARGET_TAG_VALUE
 
     # Enable DNS hostnames and support
@@ -49,7 +50,7 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
     echo "Creating Internet Gateway"
     IGW_ID=$(aws ec2 create-internet-gateway --region $region --query 'InternetGateway.InternetGatewayId' --output text)
     aws ec2 create-tags --region $region --resources $IGW_ID --tags \
-        Key=Name,Value="dig-security" \
+        Key=Name,Value=$DIG_NAME \
         Key=$TARGET_TAG_KEY,Value=$TARGET_TAG_VALUE
     aws ec2 attach-internet-gateway --region $region --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
 
@@ -116,7 +117,7 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         --query 'VpcEndpoint.VpcEndpointId' \
         --output text)
     aws ec2 create-tags --region $region --resources $S3_ENDPOINT --tags \
-        Key=Name,Value="dig-security-s3" \
+        Key=Name,Value=$DIG_NAME \
         Key=$TARGET_TAG_KEY,Value=$TARGET_TAG_VALUE
 
     echo "Successfully created VPC and all components in region $region"
