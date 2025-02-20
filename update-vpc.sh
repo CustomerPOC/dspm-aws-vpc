@@ -44,34 +44,31 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         continue
     fi
 
-    # Get VPC CIDR blocks and convert to array
-    VPC_CIDR_BLOCKS=($(aws ec2 describe-vpcs --region $region \
+    # Get VPC CIDR blocks
+    echo "Getting CIDR blocks for VPC $VPC_ID"
+    VPC_CIDR_OUTPUT=$(aws ec2 describe-vpcs --region $region \
         --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" \
         --query "Vpcs[*].CidrBlockAssociationSet[*].[CidrBlock,AssociationId]" \
-        --output text))
-    
-    echo "Found CIDR blocks: ${VPC_CIDR_BLOCKS[@]}"
-    # Add the new CIDR block to the VPC
-    echo "Adding CIDR block $cidr to VPC $VPC_ID"
+        --output text)
+
+    echo "Found CIDR blocks: $VPC_CIDR_OUTPUT"
     ADD_CIDR="true"
 
-    # Process array elements in pairs (CidrBlock and AssociationId)
-    for ((i=0; i<${#VPC_CIDR_BLOCKS[@]}; i+=2)); do
-        existing_cidr="${VPC_CIDR_BLOCKS[i]}"
-        association_id="${VPC_CIDR_BLOCKS[i+1]}"
-        
-        # Clean up any whitespace in the variables
-        existing_cidr=$(echo "$existing_cidr" | tr -d '[:space:]')
-        association_id=$(echo "$association_id" | tr -d '[:space:]')
-        
-        echo "Checking CIDR block: $existing_cidr (AssociationId: $association_id)"
-        
-        if [ "$existing_cidr" = "$cidr" ]; then
-            ADD_CIDR="false"
-            echo "CIDR block $existing_cidr already exists, skipping addition"
-            break
+    # Read the CIDR blocks line by line
+    while read -r line; do
+        if [ -n "$line" ]; then
+            existing_cidr=$(echo "$line" | awk '{print $1}')
+            association_id=$(echo "$line" | awk '{print $2}')
+            
+            echo "Checking CIDR block: $existing_cidr (AssociationId: $association_id)"
+            
+            if [ "$existing_cidr" = "$cidr" ]; then
+                ADD_CIDR="false"
+                echo "CIDR block $existing_cidr already exists, skipping addition"
+                break
+            fi
         fi
-    done
+    done <<< "$VPC_CIDR_OUTPUT"
 
     if [ "$ADD_CIDR" = "true" ]; then
         if ! aws ec2 associate-vpc-cidr-block --region $region --vpc-id $VPC_ID --cidr-block $cidr; then
@@ -159,16 +156,18 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         aws ec2 delete-subnet --region $region --subnet-id $PRIVATE_SUBNET_ORIGINAL || echo "Warning: Failed to delete original private subnet"
     fi
     
-    # Remove old CIDR blocks
-    for ((i=0; i<${#VPC_CIDR_BLOCKS[@]}; i+=2)); do
-        existing_cidr="${VPC_CIDR_BLOCKS[i]}"
-        association_id="${VPC_CIDR_BLOCKS[i+1]}"
-        
-        if [ "$existing_cidr" != "$cidr" ]; then
-            echo "Removing CIDR block: $existing_cidr (AssociationId: $association_id)"
-            aws ec2 delete-vpc-cidr-block --region $region --association-id "$association_id"
+    # Update the CIDR removal section as well
+    while read -r line; do
+        if [ -n "$line" ]; then
+            existing_cidr=$(echo "$line" | awk '{print $1}')
+            association_id=$(echo "$line" | awk '{print $2}')
+            
+            if [ "$existing_cidr" != "$cidr" ]; then
+                echo "Removing CIDR block: $existing_cidr (AssociationId: $association_id)"
+                aws ec2 delete-vpc-cidr-block --region $region --association-id "$association_id"
+            fi
         fi
-    done
+    done <<< "$VPC_CIDR_OUTPUT"
 
     echo "Successfully processed region $region"
 
