@@ -6,7 +6,7 @@ set -e
 DIG_NAME="dig-securityuse1"
 TARGET_TAG_KEY="dig-security"
 TARGET_TAG_VALUE="true"
-CSV_FILE="example.csv"
+CSV_FILE="new-addresses.csv"
 IFS=","
 
 # Function to handle errors

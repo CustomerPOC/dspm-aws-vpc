@@ -1,2 +1,0 @@
-region,cidr,private_subnet,public_subnet
-us-west-1,10.10.0.0/23,10.10.0.0/24,10.10.1.0/24

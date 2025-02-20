@@ -1,21 +1,21 @@
 # VPC Recreation Script
 
 ## Overview
-This script automates the process of recreating AWS VPC infrastructure across multiple regions. It first cleans up existing resources and then creates new ones. The script performs the following operations:
+This script automates the process of recreating Prisma Cloud DSPM VPC infrastructure across multiple regions. The script performs the following operations:
 - Deletes existing VPCs and associated resources (cleanup phase)
 - Creates new VPCs with specified CIDR blocks
 - Sets up public and private subnets
-- Configures routing with Internet and NAT Gateways
+- Configures routing 
 - Creates VPC endpoints for S3
 - Maintains consistent tagging across all resources
 
 ## Prerequisites
-- AWS CLI installed and configured with appropriate permissions
+- AWS CLI installed and configured (or AWS cloud shell) with appropriate permissions 
 - Bash shell environment
 - CSV file with the required configuration format
 
 ## CSV File Format
-The script expects a CSV file named `example.csv` with the following structure:
+The script expects a CSV file named `new-addresses.csv` with the following structure:
 
 ```csv
 region,cidr,private_subnet,public_subnet
@@ -93,4 +93,3 @@ The script provides detailed logging of:
 - Validates CSV input format
 - Checks for required parameters
 - Uses separate route tables for public and private subnets
-
