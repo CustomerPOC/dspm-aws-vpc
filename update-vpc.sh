@@ -44,18 +44,24 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         continue
     fi
 
-    VPC_CIDR_BLOCKS=$(aws ec2 describe-vpcs --region $region --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" --query "Vpcs[*].CidrBlockAssociationSet[*].CidrBlock" --output text | tr -s '[:space:]')
-    #VPC_CIDR_BLOCKS=$(aws ec2 describe-vpcs --region us-west-1 --filters "Name=tag:dig-security,Values=true" --query 'Vpcs[*].CidrBlockAssociationSet[*].CidrBlock' --output text | tr '\t' '\n' | sort -u)
+    # Get VPC CIDR blocks and convert to array
+    VPC_CIDR_BLOCKS=($(aws ec2 describe-vpcs --region $region \
+        --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" \
+        --query "Vpcs[*].CidrBlockAssociationSet[*].[CidrBlock,AssociationId]" \
+        --output text))
     
-    echo $VPC_CIDR_BLOCKS
+    echo "Found CIDR blocks: ${VPC_CIDR_BLOCKS[@]}"
     # Add the new CIDR block to the VPC
     echo "Adding CIDR block $cidr to VPC $VPC_ID"
     ADD_CIDR="true"
 
-    for existing_cidr in $VPC_CIDR_BLOCKS; do
-        echo "Checking CIDR block: $existing_cidr"
-        echo "CIDR block: $cidr"
-  
+    # Process array elements in pairs (CidrBlock and AssociationId)
+    for ((i=0; i<${#VPC_CIDR_BLOCKS[@]}; i+=2)); do
+        existing_cidr="${VPC_CIDR_BLOCKS[i]}"
+        association_id="${VPC_CIDR_BLOCKS[i+1]}"
+        
+        echo "Checking CIDR block: $existing_cidr (AssociationId: $association_id)"
+        
         if [ "$existing_cidr" = "$cidr" ]; then
             ADD_CIDR="false"
             echo "CIDR block: $existing_cidr already exists, nothing to add"
@@ -150,12 +156,13 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
     fi
     
     # Remove old CIDR blocks
-    for existing_cidr in $VPC_CIDR_BLOCKS; do
+    for ((i=0; i<${#VPC_CIDR_BLOCKS[@]}; i+=2)); do
+        existing_cidr="${VPC_CIDR_BLOCKS[i]}"
+        association_id="${VPC_CIDR_BLOCKS[i+1]}"
+        
         if [ "$existing_cidr" != "$cidr" ]; then
-            echo "Removing CIDR block: $existing_cidr"
-            # the following arguments are required: --association-id
-            aws ec2 delete-vpc-cidr-block --region $region --association-id $existing_cidr
-            #aws ec2 disassociate-vpc-cidr-block --region $region --vpc-id $VPC_ID
+            echo "Removing CIDR block: $existing_cidr (AssociationId: $association_id)"
+            aws ec2 delete-vpc-cidr-block --region $region --association-id "$association_id"
         fi
     done
 
