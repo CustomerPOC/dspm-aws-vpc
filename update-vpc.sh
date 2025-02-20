@@ -50,16 +50,12 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         --query "Vpcs[*].CidrBlockAssociationSet[*].[CidrBlock,AssociationId]" \
         --output text)
 
-    echo "Found CIDR blocks: $VPC_CIDR_OUTPUT"
     ADD_CIDR="true"
-
     # Read the CIDR blocks line by line
     while read -r line; do
         if [ -n "$line" ]; then
             existing_cidr=$(echo "$line" | awk '{print $1}')
             association_id=$(echo "$line" | awk '{print $2}')
-            
-            echo "Checking CIDR block: $existing_cidr (AssociationId: $association_id)"
             
             if [ "$existing_cidr" = "$cidr" ]; then
                 ADD_CIDR="false"
