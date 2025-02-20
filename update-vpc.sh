@@ -91,26 +91,48 @@ tail -n +2 "$CSV_FILE" | while read -r region cidr private_subnet public_subnet;
         continue
     fi
 
-    echo "Creating new public subnet"
-    if ! PUBLIC_SUBNET_NEW=$(aws ec2 create-subnet --region $region --vpc-id $VPC_ID --cidr-block $public_subnet --availability-zone $(aws ec2 describe-availability-zones --region $region --query 'AvailabilityZones[0].ZoneName' --output text) --query 'Subnet.SubnetId' --output text); then
-        echo "Error: Failed to create new public subnet"
-        continue
+    # Before creating public subnet, check if CIDR already exists
+    echo "Checking for existing subnets with CIDR $public_subnet"
+    EXISTING_PUBLIC_SUBNET=$(aws ec2 describe-subnets --region $region \
+        --filters "Name=vpc-id,Values=$VPC_ID" "Name=cidr-block,Values=$public_subnet" \
+        --query 'Subnets[0].SubnetId' --output text)
+
+    if [ "$EXISTING_PUBLIC_SUBNET" != "None" ] && [ -n "$EXISTING_PUBLIC_SUBNET" ]; then
+        echo "Subnet with CIDR $public_subnet already exists (SubnetId: $EXISTING_PUBLIC_SUBNET), skipping creation"
+        PUBLIC_SUBNET_NEW=$EXISTING_PUBLIC_SUBNET
+    else
+        echo "Creating new public subnet"
+        if ! PUBLIC_SUBNET_NEW=$(aws ec2 create-subnet --region $region --vpc-id $VPC_ID --cidr-block $public_subnet --availability-zone $(aws ec2 describe-availability-zones --region $region --query 'AvailabilityZones[0].ZoneName' --output text) --query 'Subnet.SubnetId' --output text); then
+            echo "Error: Failed to create new public subnet"
+            continue
+        fi
+
+        echo "Tagging new public subnet"
+        aws ec2 create-tags --region $region --resources $PUBLIC_SUBNET_NEW --tags Key=Name,Value="dig-security-publicuse1" Key=dig-security,Value=true
     fi
 
-    echo "Tagging new public subnet"
-    aws ec2 create-tags --region $region --resources $PUBLIC_SUBNET_NEW --tags Key=Name,Value="dig-security-publicuse1" Key=dig-security,Value=true
+    # Before creating private subnet, check if CIDR already exists
+    echo "Checking for existing subnets with CIDR $private_subnet"
+    EXISTING_PRIVATE_SUBNET=$(aws ec2 describe-subnets --region $region \
+        --filters "Name=vpc-id,Values=$VPC_ID" "Name=cidr-block,Values=$private_subnet" \
+        --query 'Subnets[0].SubnetId' --output text)
+
+    if [ "$EXISTING_PRIVATE_SUBNET" != "None" ] && [ -n "$EXISTING_PRIVATE_SUBNET" ]; then
+        echo "Subnet with CIDR $private_subnet already exists (SubnetId: $EXISTING_PRIVATE_SUBNET), skipping creation"
+        PRIVATE_SUBNET_NEW=$EXISTING_PRIVATE_SUBNET
+    else
+        echo "Creating new private subnet"
+        if ! PRIVATE_SUBNET_NEW=$(aws ec2 create-subnet --region $region --vpc-id $VPC_ID --cidr-block $private_subnet --availability-zone $(aws ec2 describe-availability-zones --region $region --query 'AvailabilityZones[0].ZoneName' --output text) --query 'Subnet.SubnetId' --output text); then
+            echo "Error: Failed to create new private subnet"
+            continue
+        fi
+
+        echo "Tagging new private subnet"
+        aws ec2 create-tags --region $region --resources $PRIVATE_SUBNET_NEW --tags Key=Name,Value="dig-security-privateuse1" Key=dig-security,Value=true
+    fi
 
     echo "Associating public subnet with route table"
     aws ec2 associate-route-table --region $region --route-table-id $PUBLIC_ROUTE_TABLE --subnet-id $PUBLIC_SUBNET_NEW
-
-    echo "Creating new private subnet"
-    if ! PRIVATE_SUBNET_NEW=$(aws ec2 create-subnet --region $region --vpc-id $VPC_ID --cidr-block $private_subnet --availability-zone $(aws ec2 describe-availability-zones --region $region --query 'AvailabilityZones[0].ZoneName' --output text) --query 'Subnet.SubnetId' --output text); then
-        echo "Error: Failed to create new private subnet"
-        continue
-    fi
-
-    echo "Tagging new private subnet"
-    aws ec2 create-tags --region $region --resources $PRIVATE_SUBNET_NEW --tags Key=Name,Value="dig-security-privateuse1" Key=dig-security,Value=true
 
     echo "Associating private subnet with route table"
     aws ec2 associate-route-table --region $region --route-table-id $PRIVATE_ROUTE_TABLE --subnet-id $PRIVATE_SUBNET_NEW
