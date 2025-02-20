@@ -57,14 +57,16 @@ cleanup_vpc_resources() {
         done
 
         # Delete VPC Endpoints
-        VPC_ENDPOINTS=$(aws ec2 describe-vpc-endpoints --region $region \
+        VPC_ENDPOINT_OUTPUT=$(aws ec2 describe-vpc-endpoints --region $region \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query 'VpcEndpoints[*].VpcEndpointId' --output text)
-        
-        for ENDPOINT in $VPC_ENDPOINTS; do
-            echo "Deleting VPC Endpoint: $ENDPOINT"
-            aws ec2 delete-vpc-endpoints --region $region --vpc-endpoint-ids $ENDPOINT
-        done
+
+        while read -r ENDPOINT; do
+            if [ -n "$ENDPOINT" ]; then
+                echo "Deleting VPC Endpoint: $ENDPOINT"
+                aws ec2 delete-vpc-endpoints --region $region --vpc-endpoint-ids $ENDPOINT
+            fi
+        done <<< "$VPC_ENDPOINT_OUTPUT"
 
         # Detach and delete Internet Gateways
         IGW_ID=$(aws ec2 describe-internet-gateways --region $region \
@@ -78,34 +80,40 @@ cleanup_vpc_resources() {
         fi
 
         # Delete Subnets
-        SUBNETS=$(aws ec2 describe-subnets --region $region \
+        SUBNET_OUTPUT=$(aws ec2 describe-subnets --region $region \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query 'Subnets[*].SubnetId' --output text)
-        
-        for SUBNET in $SUBNETS; do
-            echo "Deleting Subnet: $SUBNET"
-            aws ec2 delete-subnet --region $region --subnet-id $SUBNET
-        done
+
+        while read -r SUBNET; do
+            if [ -n "$SUBNET" ]; then
+                echo "Deleting Subnet: $SUBNET"
+                aws ec2 delete-subnet --region $region --subnet-id $SUBNET
+            fi
+        done <<< "$SUBNET_OUTPUT"
 
         # Delete Route Tables (except main)
-        ROUTE_TABLES=$(aws ec2 describe-route-tables --region $region \
+        ROUTE_TABLE_OUTPUT=$(aws ec2 describe-route-tables --region $region \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query 'RouteTables[?Associations[0].Main != `true`].RouteTableId' --output text)
-        
-        for RT in $ROUTE_TABLES; do
-            echo "Deleting Route Table: $RT"
-            aws ec2 delete-route-table --region $region --route-table-id $RT
-        done
+
+        while read -r RT; do
+            if [ -n "$RT" ]; then
+                echo "Deleting Route Table: $RT"
+                aws ec2 delete-route-table --region $region --route-table-id $RT
+            fi
+        done <<< "$ROUTE_TABLE_OUTPUT"
 
         # Release Elastic IPs
-        EIPs=$(aws ec2 describe-addresses --region $region \
+        EIP_OUTPUT=$(aws ec2 describe-addresses --region $region \
             --filters "Name=domain,Values=vpc" \
             --query 'Addresses[?AssociationId==null].AllocationId' --output text)
-        
-        for EIP in $EIPs; do
-            echo "Releasing Elastic IP: $EIP"
-            aws ec2 release-address --region $region --allocation-id $EIP
-        done
+
+        while read -r EIP; do
+            if [ -n "$EIP" ]; then
+                echo "Releasing Elastic IP: $EIP"
+                aws ec2 release-address --region $region --allocation-id $EIP
+            fi
+        done <<< "$EIP_OUTPUT"
 
         # Finally, delete the VPC
         echo "Deleting VPC: $VPC_ID"
