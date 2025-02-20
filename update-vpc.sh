@@ -2,7 +2,6 @@
 
 # Exit on any error
 set -e
-set -x 
 
 TARGET_TAG_KEY="dig-security"
 TARGET_TAG_VALUE="true"
