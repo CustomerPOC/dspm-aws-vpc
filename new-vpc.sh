@@ -95,6 +95,32 @@ cleanup_vpc_resources() {
                 fi
             done <<< "$ROUTE_TABLE_OUTPUT"
 
+            # Detach and Delete Internet Gateways
+            IGW_OUTPUT=$(aws ec2 describe-internet-gateways --region $region \
+                --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+                --query "InternetGateways[*].[InternetGatewayId][]" --output text | tr '\t' '\n')
+
+            while read -r IGW; do
+                if [ -n "$IGW" ]; then
+                    echo "Detaching Internet Gateway: $IGW"
+                    aws ec2 detach-internet-gateway --region $region --internet-gateway-id $IGW --vpc-id $VPC_ID
+                    echo "Deleting Internet Gateway: $IGW"
+                    aws ec2 delete-internet-gateway --region $region --internet-gateway-id $IGW
+                fi
+            done <<< "$IGW_OUTPUT"
+
+            # Delete Security Groups (except default)
+            SG_OUTPUT=$(aws ec2 describe-security-groups --region $region \
+                --filters "Name=vpc-id,Values=$VPC_ID" \
+                --query "SecurityGroups[?GroupName != 'default'].[GroupId][]" --output text | tr '\t' '\n')
+
+            while read -r SG; do
+                if [ -n "$SG" ]; then
+                    echo "Deleting Security Group: $SG"
+                    aws ec2 delete-security-group --region $region --group-id $SG
+                fi
+            done <<< "$SG_OUTPUT"
+
             # Release Elastic IPs
             EIP_OUTPUT=$(aws ec2 describe-addresses --region $region \
                 --filters "Name=domain,Values=vpc" \
