@@ -30,10 +30,10 @@ cleanup_vpc_resources() {
     local region=$1
     echo "Cleaning up existing resources in region: $region"
 
-    # Find VPCs with matching tag
+    # Find VPCs with matching tag - force array output
     VPC_ID_OUTPUT=$(aws ec2 describe-vpcs --region $region \
         --filters "Name=tag:$TARGET_TAG_KEY,Values=$TARGET_TAG_VALUE" \
-        --query 'Vpcs[*].VpcId' --output text)
+        --query "Vpcs[*].[VpcId][]" --output text | tr '\t' '\n')
 
     if [ -z "$VPC_ID_OUTPUT" ] || [ "$VPC_ID_OUTPUT" == "None" ]; then
         echo "No existing VPC found with tag $TARGET_TAG_KEY=$TARGET_TAG_VALUE in region $region"
